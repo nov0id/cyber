@@ -3,6 +3,7 @@
 
 #Grants access based on user input
 
+print("What is your age??")
 age = input()
 
 if int(age) > 18:
