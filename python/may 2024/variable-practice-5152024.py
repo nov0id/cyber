@@ -30,7 +30,7 @@ for i in range(1, 7):
 
 x = 0
 while len(myDict) < 15:
-    myDict[x] = x
+    myDict[x] = x**2
     x += 1
 
 #Appends to the dictionary until the dictionary is to a certain length
