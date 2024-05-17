@@ -94,8 +94,6 @@ class ChatClient:
         try:
             while True:
                 message = self.server_socket.recv(1024).decode()
-                if message.startswith("-----BEGIN PUBLIC KEY-----"):
-                    continue
                 if not message.startswith("LOGIN"):
                     if message:
                         self.display_message(message)
@@ -104,6 +102,7 @@ class ChatClient:
                         break
         except Exception as e:
             self.display_message(f"Connection error: {e}")
+
 
     # Function to send messages to the server
     def send_message(self):

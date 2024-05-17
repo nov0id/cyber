@@ -105,12 +105,11 @@ def approve_request(username, log_func):
             users[username] = {"public_key": public_key_pem.decode()}
             save_users_to_file()
 
-            # Send the public key to the client and log the event
-            client_socket.send(public_key_pem)
+            # Log the approval event and the private key
             log_func(f"User {username} approved from {addr}")
             private_key_str = private_key_pem.decode()
             log_func(f"Private key for user {username}:\n{private_key_str}")
-            return private_key_str
+            return None  # Ensure we do not return the private key
         except Exception as e:
             log_func(f"Error approving user {username} from {addr}: {e}")
             try:
