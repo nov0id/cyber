@@ -3,7 +3,6 @@ import threading
 import json
 import os
 import base64
-import os
 from tkinter import Tk, Text, Entry, Button, END, DISABLED, NORMAL
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
@@ -12,7 +11,31 @@ from cryptography.hazmat.primitives import serialization, hashes
 users = {}
 user_requests = {}
 clients = {}
+client_public_keys = {}
 challenges = {}
+
+# Load server private and public key
+def load_server_keys():
+    global server_private_key, server_public_key
+    if os.path.exists('server_private_key.pem') and os.path.exists('server_public_key.pem'):
+        with open('server_private_key.pem', 'rb') as f:
+            server_private_key = serialization.load_pem_private_key(f.read(), password=None)
+        with open('server_public_key.pem', 'rb') as f:
+            server_public_key = serialization.load_pem_public_key(f.read())
+    else:
+        server_private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        server_public_key = server_private_key.public_key()
+        with open('server_private_key.pem', 'wb') as f:
+            f.write(server_private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            ))
+        with open('server_public_key.pem', 'wb') as f:
+            f.write(server_public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ))
 
 # Function to save users to a JSON file
 def save_users_to_file():
@@ -27,17 +50,26 @@ def load_users_from_file():
             users = json.load(f)
 
 # Function to broadcast a message to all connected clients except the sender
-def broadcast_message(message, sender_socket):
-    for client_socket in clients.values():
+def broadcast_message(message, sender_socket, sender_username):
+    for username, client_socket in clients.items():
         if client_socket != sender_socket:
             try:
-                client_socket.send(message.encode())
+                encrypted_message = client_public_keys[username].encrypt(
+                    message.encode(),
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None
+                    )
+                )
+                client_socket.send(f"{sender_username}:{base64.urlsafe_b64encode(encrypted_message).decode()}".encode())
             except Exception as e:
-                print(f"Error sending message: {e}")
+                print(f"Error sending message to {username}: {e}")
 
 # Function to handle communication with a client
 def handle_client(client_socket, addr, log_func):
     log_func(f"Handling client from {addr}")
+    username = None
     try:
         while True:
             message = client_socket.recv(1024).decode()
@@ -45,18 +77,29 @@ def handle_client(client_socket, addr, log_func):
                 log_func("Client disconnected")
                 break
             log_func(f"Received message from {addr}: {message}")
-            if message.startswith("REQUEST_USER_CREATION"):
+            if message == "GET_SERVER_PUBLIC_KEY":
+                client_socket.send(server_public_key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ))
+            elif message.startswith("REQUEST_USER_CREATION"):
                 username = message.split(":")[1]
                 user_requests[username] = (client_socket, addr)
                 log_func(f"User creation request received for {username} from {addr}")
             elif message.startswith("LOGIN_REQUEST"):
-                username = message.split(":")[1]
+                username, public_key_pem = message.split(":")[1:]
                 if username in users:
                     challenge = base64.urlsafe_b64encode(os.urandom(32)).decode()
                     challenges[username] = challenge
                     client_socket.send(f"CHALLENGE:{challenge}".encode())
                 else:
-                    client_socket.send(b"INVALID_USER")
+                    client_public_keys[username] = serialization.load_pem_public_key(public_key_pem.encode())
+                    for client_name, client_sock in clients.items():
+                        if client_sock != client_socket:
+                            client_sock.send(f"PUBLIC_KEY:{username}:{public_key_pem}".encode())
+                    challenge = base64.urlsafe_b64encode(os.urandom(32)).decode()
+                    challenges[username] = challenge
+                    client_socket.send(f"CHALLENGE:{challenge}".encode())
             elif message.startswith("CHALLENGE_RESPONSE"):
                 username, response = message.split(":")[1:]
                 if username in challenges:
@@ -77,8 +120,17 @@ def handle_client(client_socket, addr, log_func):
                 else:
                     client_socket.send(b"INVALID_USER")
             else:
-                username, message = message.split(":", 1)
-                broadcast_message(f"{username}> {message}", client_socket)
+                sender_username, encrypted_message_b64 = message.split(":", 1)
+                encrypted_message = base64.urlsafe_b64decode(encrypted_message_b64.encode())
+                decrypted_message = server_private_key.decrypt(
+                    encrypted_message,
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None
+                    )
+                ).decode()
+                broadcast_message(decrypted_message, client_socket, sender_username)
     except Exception as e:
         log_func(f"Error handling client {addr}: {e}")
     finally:
@@ -195,6 +247,7 @@ class ServerGUI:
         self.entry_box.delete(0, END)
 
 def main():
+    load_server_keys()
     load_users_from_file()
     root = Tk()
     gui = ServerGUI(root)
