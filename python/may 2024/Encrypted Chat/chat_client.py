@@ -23,13 +23,12 @@ class ChatClient:
         try:
             self.server_socket.connect(("127.0.0.1", 9999))
             self.display_message("Connected to server.")
-            self.retrieve_server_public_key()
         except Exception as e:
             self.display_message(f"Connection error: {e}")
             return
 
         self.login_window = Toplevel()
-        self.login_window.title("Login or Create Account")
+        self.login_window.title("Login or Request Account")
 
         self.username_label = Label(self.login_window, text="Username:")
         self.username_label.pack(padx=10, pady=(10, 0))
@@ -56,23 +55,14 @@ class ChatClient:
         self.username = None
         self.private_key = None
         self.server_public_key = None
-        self.client_public_keys = {}
-
-    def retrieve_server_public_key(self):
-        self.server_socket.send(b"GET_SERVER_PUBLIC_KEY")
-        server_public_key_pem = self.server_socket.recv(1024)
-        self.server_public_key = serialization.load_pem_public_key(server_public_key_pem)
 
     def login_request(self):
         self.username = self.username_entry.get()
         private_key_pem = self.private_key_entry.get().encode()
+
         try:
             self.private_key = serialization.load_pem_private_key(private_key_pem, password=None)
-            public_key_pem = self.private_key.public_key().public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
-            )
-            login_message = f"LOGIN_REQUEST:{self.username}:{public_key_pem.decode()}"
+            login_message = f"LOGIN_REQUEST:{self.username}"
             self.server_socket.send(login_message.encode())
         except Exception as e:
             self.display_message(f"Login request failed: {e}")
@@ -96,27 +86,34 @@ class ChatClient:
                 elif message == "LOGIN_SUCCESS":
                     self.login_window.destroy()
                     self.display_message("Login successful.")
+                    self.server_socket.send(f"PKEY_REQUEST:{self.username}".encode())
+                    public_key_pem = self.private_key.public_key().public_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PublicFormat.SubjectPublicKeyInfo
+                    )
+                    self.server_socket.send(f"USER_PUBLIC_KEY:{self.username}:{base64.urlsafe_b64encode(public_key_pem).decode()}".encode())
+                elif message.startswith("PKEY:"):
+                    server_public_key_pem = base64.urlsafe_b64decode(message.split(":")[1].encode())
+                    self.server_public_key = serialization.load_pem_public_key(server_public_key_pem)
+                    self.display_message("Received server public key.")
+                elif message.startswith("MSG:"):
+                    encrypted_message = base64.urlsafe_b64decode(message.split("MSG:")[1].encode())
+                    decrypted_message = self.private_key.decrypt(
+                        encrypted_message,
+                        padding.OAEP(
+                            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                            algorithm=hashes.SHA256(),
+                            label=None
+                        )
+                    ).decode()
+                    self.display_message(decrypted_message)
                 elif message == "INVALID_USER":
                     self.display_message("Invalid username or user not approved.")
                 elif message == "INVALID_RESPONSE":
                     self.display_message("Invalid response to challenge.")
-                elif message.startswith("PUBLIC_KEY:"):
-                    username, public_key_pem = message.split(":")[1:]
-                    self.client_public_keys[username] = serialization.load_pem_public_key(public_key_pem.encode())
-                    self.display_message(f"Received public key for {username}")
                 else:
                     if message:
-                        username, encrypted_message_b64 = message.split(":", 1)
-                        encrypted_message = base64.urlsafe_b64decode(encrypted_message_b64.encode())
-                        decrypted_message = self.private_key.decrypt(
-                            encrypted_message,
-                            padding.OAEP(
-                                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                                algorithm=hashes.SHA256(),
-                                label=None
-                            )
-                        ).decode()
-                        self.display_message(f"{username}: {decrypted_message}")
+                        self.display_message(message)
                     else:
                         self.display_message("Server disconnected.")
                         break
@@ -138,23 +135,22 @@ class ChatClient:
 
     def send_message(self):
         message = self.entry_box.get()
-        if message:
+        if message and self.server_public_key:
             try:
                 encrypted_message = self.server_public_key.encrypt(
-                    message.encode(),
+                    f"{self.username}: {message}".encode(),
                     padding.OAEP(
                         mgf=padding.MGF1(algorithm=hashes.SHA256()),
                         algorithm=hashes.SHA256(),
                         label=None
                     )
                 )
-                self.server_socket.send(f"{self.username}:{base64.urlsafe_b64encode(encrypted_message).decode()}".encode())
+                self.server_socket.send(f"MSG:{base64.urlsafe_b64encode(encrypted_message).decode()}".encode())
                 self.display_message(f"You: {message}")
                 self.entry_box.delete(0, END)
             except Exception as e:
                 self.display_message(f"Failed to send message: {e}")
 
-                
     def display_message(self, message):
         self.text_area.config(state=NORMAL)
         self.text_area.insert(END, message + '\n')

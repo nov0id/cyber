@@ -11,31 +11,33 @@ from cryptography.hazmat.primitives import serialization, hashes
 users = {}
 user_requests = {}
 clients = {}
-client_public_keys = {}
 challenges = {}
+client_public_keys = {}
 
-# Load server private and public key
-def load_server_keys():
-    global server_private_key, server_public_key
+# Load or generate server keys
+def load_or_generate_server_keys():
     if os.path.exists('server_private_key.pem') and os.path.exists('server_public_key.pem'):
         with open('server_private_key.pem', 'rb') as f:
-            server_private_key = serialization.load_pem_private_key(f.read(), password=None)
+            private_key_pem = f.read()
         with open('server_public_key.pem', 'rb') as f:
-            server_public_key = serialization.load_pem_public_key(f.read())
+            public_key_pem = f.read()
+        private_key = serialization.load_pem_private_key(private_key_pem, password=None)
+        public_key = serialization.load_pem_public_key(public_key_pem)
     else:
-        server_private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        server_public_key = server_private_key.public_key()
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        public_key = private_key.public_key()
         with open('server_private_key.pem', 'wb') as f:
-            f.write(server_private_key.private_bytes(
+            f.write(private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
                 encryption_algorithm=serialization.NoEncryption()
             ))
         with open('server_public_key.pem', 'wb') as f:
-            f.write(server_public_key.public_bytes(
+            f.write(public_key.public_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PublicFormat.SubjectPublicKeyInfo
             ))
+    return private_key, public_key
 
 # Function to save users to a JSON file
 def save_users_to_file():
@@ -50,11 +52,12 @@ def load_users_from_file():
             users = json.load(f)
 
 # Function to broadcast a message to all connected clients except the sender
-def broadcast_message(message, sender_socket, sender_username):
+def broadcast_message(message, sender_socket):
     for username, client_socket in clients.items():
         if client_socket != sender_socket:
             try:
-                encrypted_message = client_public_keys[username].encrypt(
+                public_key = client_public_keys[username]
+                encrypted_message = public_key.encrypt(
                     message.encode(),
                     padding.OAEP(
                         mgf=padding.MGF1(algorithm=hashes.SHA256()),
@@ -62,14 +65,13 @@ def broadcast_message(message, sender_socket, sender_username):
                         label=None
                     )
                 )
-                client_socket.send(f"{sender_username}:{base64.urlsafe_b64encode(encrypted_message).decode()}".encode())
+                client_socket.send(f"MSG:{base64.urlsafe_b64encode(encrypted_message).decode()}".encode())
             except Exception as e:
-                print(f"Error sending message to {username}: {e}")
+                print(f"Error sending message: {e}")
 
 # Function to handle communication with a client
-def handle_client(client_socket, addr, log_func):
+def handle_client(client_socket, addr, log_func, server_private_key, server_public_key):
     log_func(f"Handling client from {addr}")
-    username = None
     try:
         while True:
             message = client_socket.recv(1024).decode()
@@ -77,29 +79,18 @@ def handle_client(client_socket, addr, log_func):
                 log_func("Client disconnected")
                 break
             log_func(f"Received message from {addr}: {message}")
-            if message == "GET_SERVER_PUBLIC_KEY":
-                client_socket.send(server_public_key.public_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo
-                ))
-            elif message.startswith("REQUEST_USER_CREATION"):
+            if message.startswith("REQUEST_USER_CREATION"):
                 username = message.split(":")[1]
                 user_requests[username] = (client_socket, addr)
                 log_func(f"User creation request received for {username} from {addr}")
             elif message.startswith("LOGIN_REQUEST"):
-                username, public_key_pem = message.split(":")[1:]
+                username = message.split(":")[1]
                 if username in users:
                     challenge = base64.urlsafe_b64encode(os.urandom(32)).decode()
                     challenges[username] = challenge
                     client_socket.send(f"CHALLENGE:{challenge}".encode())
                 else:
-                    client_public_keys[username] = serialization.load_pem_public_key(public_key_pem.encode())
-                    for client_name, client_sock in clients.items():
-                        if client_sock != client_socket:
-                            client_sock.send(f"PUBLIC_KEY:{username}:{public_key_pem}".encode())
-                    challenge = base64.urlsafe_b64encode(os.urandom(32)).decode()
-                    challenges[username] = challenge
-                    client_socket.send(f"CHALLENGE:{challenge}".encode())
+                    client_socket.send(b"INVALID_USER")
             elif message.startswith("CHALLENGE_RESPONSE"):
                 username, response = message.split(":")[1:]
                 if username in challenges:
@@ -119,23 +110,35 @@ def handle_client(client_socket, addr, log_func):
                         client_socket.send(b"INVALID_RESPONSE")
                 else:
                     client_socket.send(b"INVALID_USER")
+            elif message.startswith("PKEY_REQUEST"):
+                client_socket.send(f"PKEY:{base64.urlsafe_b64encode(server_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)).decode()}".encode())
+            elif message.startswith("USER_PUBLIC_KEY"):
+                username, public_key_pem = message.split(":")[1:]
+                client_public_keys[username] = serialization.load_pem_public_key(base64.urlsafe_b64decode(public_key_pem.encode()))
+                log_func(f"Received public key from {username}")
+            elif message.startswith("MSG:"):
+                try:
+                    encrypted_message = base64.urlsafe_b64decode(message.split("MSG:")[1].encode())
+                    decrypted_message = server_private_key.decrypt(
+                        encrypted_message,
+                        padding.OAEP(
+                            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                            algorithm=hashes.SHA256(),
+                            label=None
+                        )
+                    ).decode()
+                    log_func(f"Decrypted message from {addr}: {decrypted_message}")
+                    broadcast_message(decrypted_message, client_socket)
+                except Exception as e:
+                    log_func(f"Error decrypting message from {addr}: {e}")
+                    client_socket.send(b"INVALID_MESSAGE")
             else:
-                sender_username, encrypted_message_b64 = message.split(":", 1)
-                encrypted_message = base64.urlsafe_b64decode(encrypted_message_b64.encode())
-                decrypted_message = server_private_key.decrypt(
-                    encrypted_message,
-                    padding.OAEP(
-                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                        algorithm=hashes.SHA256(),
-                        label=None
-                    )
-                ).decode()
-                broadcast_message(decrypted_message, client_socket, sender_username)
+                client_socket.send(b"INVALID_MESSAGE")
     except Exception as e:
         log_func(f"Error handling client {addr}: {e}")
     finally:
         log_func(f"Closing client socket from {addr}")
-        if username in clients:
+        if 'username' in locals() and username in clients:
             del clients[username]
         try:
             client_socket.close()
@@ -216,6 +219,8 @@ class ServerGUI:
         self.server_socket.listen(5)
         self.log("Server listening on port 9999")
 
+        self.server_private_key, self.server_public_key = load_or_generate_server_keys()
+
         self.accept_thread = threading.Thread(target=self.accept_clients)
         self.accept_thread.start()
 
@@ -229,7 +234,7 @@ class ServerGUI:
         while True:
             client_socket, addr = self.server_socket.accept()
             self.log(f"Accepted connection from {addr}")
-            client_handler = threading.Thread(target=handle_client, args=(client_socket, addr, self.log))
+            client_handler = threading.Thread(target=handle_client, args=(client_socket, addr, self.log, self.server_private_key, self.server_public_key))
             client_handler.start()
 
     def process_command(self):
@@ -247,7 +252,6 @@ class ServerGUI:
         self.entry_box.delete(0, END)
 
 def main():
-    load_server_keys()
     load_users_from_file()
     root = Tk()
     gui = ServerGUI(root)
