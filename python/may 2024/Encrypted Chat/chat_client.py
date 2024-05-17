@@ -83,23 +83,31 @@ class ChatClient:
                 if message.startswith("CHALLENGE:"):
                     challenge = message.split(":")[1]
                     self.handle_challenge(challenge)
+                #On sucsessful completion of signing challenge, the server will acknowledge this with a "LOGIN_SUCCESS" message. We then calculate and broadcast our public key
+                #to the server for communications
                 elif message == "LOGIN_SUCCESS":
+                    #Closes login window and changes the title of our main window to indicate the logged in user
                     self.login_window.destroy()
+                    self.master.title(f"Chat Client: {self.username}")
                     self.display_message("Login successful.")
                     self.server_socket.send(f"PKEY_REQUEST:{self.username}".encode())
+                    #Calculates public key from private key, sterilizes to bytes in pem format
                     public_key_pem = self.private_key.public_key().public_bytes(
                         encoding=serialization.Encoding.PEM,
                         format=serialization.PublicFormat.SubjectPublicKeyInfo
                     )
+                    #Converts the storable public key to a transmission friendly version encoding with base64.urlsafe_b64encode to avoid bad characters, and then encodes to UTF-8. This is all
+                    #send to the server for storage so other users may contact us.
                     self.server_socket.send(f"USER_PUBLIC_KEY:{self.username}:{base64.urlsafe_b64encode(public_key_pem).decode()}".encode())
+                #Handles when the server sends us a private key back to for sending encrypted messages to the server
                 elif message.startswith("PKEY:"):
                     server_public_key_pem = base64.urlsafe_b64decode(message.split(":")[1].encode())
                     self.server_public_key = serialization.load_pem_public_key(server_public_key_pem)
                     self.display_message("Received server public key.")
+                #Handles receiving a message, decrypts using our private key
                 elif message.startswith("MSG:"):
-                    encrypted_message = base64.urlsafe_b64decode(message.split("MSG:")[1].encode())
                     decrypted_message = self.private_key.decrypt(
-                        encrypted_message,
+                        base64.urlsafe_b64decode(message.split("MSG:")[1].encode()),
                         padding.OAEP(
                             mgf=padding.MGF1(algorithm=hashes.SHA256()),
                             algorithm=hashes.SHA256(),
