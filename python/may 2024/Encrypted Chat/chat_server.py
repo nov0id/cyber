@@ -3,6 +3,7 @@ import threading
 import json
 import os
 import base64
+import getpass
 from tkinter import Tk, Text, Entry, Button, END, DISABLED, NORMAL
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
@@ -17,20 +18,24 @@ client_public_keys = {}
 # Load or generate server keys
 def load_or_generate_server_keys():
     if os.path.exists('server_private_key.pem') and os.path.exists('server_public_key.pem'):
+        # Prompt for password to load existing keys
+        password = getpass.getpass("Enter password to load server private key: ").encode()
         with open('server_private_key.pem', 'rb') as f:
             private_key_pem = f.read()
         with open('server_public_key.pem', 'rb') as f:
             public_key_pem = f.read()
-        private_key = serialization.load_pem_private_key(private_key_pem, password=None)
+        private_key = serialization.load_pem_private_key(private_key_pem, password=password)
         public_key = serialization.load_pem_public_key(public_key_pem)
     else:
+        # Generate new keys and prompt for password to encrypt private key
+        password = getpass.getpass("Enter password to encrypt server private key: ").encode()
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         public_key = private_key.public_key()
         with open('server_private_key.pem', 'wb') as f:
             f.write(private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
+                encryption_algorithm=serialization.BestAvailableEncryption(password)
             ))
         with open('server_public_key.pem', 'wb') as f:
             f.write(public_key.public_bytes(
