@@ -1,24 +1,15 @@
 import socket
 import threading
-from tkinter import Tk, Text, Entry, Button, END, DISABLED, NORMAL, Scrollbar, VERTICAL
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import padding
-from cryptography.hazmat.backends import default_backend
-
-KEY = b'1234567890abcdef'
-IV = b'abcdef1234567890'
+from tkinter import Tk, Text, Entry, Button, END, DISABLED, NORMAL, Label, Toplevel
+from cryptography.hazmat.primitives import serialization
 
 class ChatClient:
     def __init__(self, master):
         self.master = master
-        self.master.title("Encrypted Chat Client")
+        self.master.title("Chat Client")
 
         self.text_area = Text(master, state=DISABLED, wrap='word', height=20, width=50)
         self.text_area.pack(padx=10, pady=10)
-
-        self.scrollbar = Scrollbar(master, orient=VERTICAL, command=self.text_area.yview)
-        self.scrollbar.pack(side='right', fill='y')
-        self.text_area.config(yscrollcommand=self.scrollbar.set)
 
         self.entry_box = Entry(master, width=40)
         self.entry_box.pack(padx=10, pady=(0, 10))
@@ -26,50 +17,92 @@ class ChatClient:
         self.send_button = Button(master, text="Send", command=self.send_message)
         self.send_button.pack(padx=10, pady=(0, 10))
 
-        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client_socket.connect(("127.0.0.1", 9999))
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self.server_socket.connect(("127.0.0.1", 9999))
+            self.display_message("Connected to server.")
+        except Exception as e:
+            self.display_message(f"Connection error: {e}")
+            return
+
+        self.login_window = Toplevel()
+        self.login_window.title("Login or Create Account")
+
+        self.username_label = Label(self.login_window, text="Username:")
+        self.username_label.pack(padx=10, pady=(10, 0))
+
+        self.username_entry = Entry(self.login_window)
+        self.username_entry.pack(padx=10, pady=(0, 10))
+
+        self.private_key_label = Label(self.login_window, text="Private Key (paste from clipboard):")
+        self.private_key_label.pack(padx=10, pady=(10, 0))
+
+        self.private_key_entry = Entry(self.login_window)
+        self.private_key_entry.pack(padx=10, pady=(0, 10))
+
+        self.login_button = Button(self.login_window, text="Login", command=self.login)
+        self.login_button.pack(padx=10, pady=(0, 10))
+
+        self.create_account_button = Button(self.login_window, text="Create Account", command=self.create_account)
+        self.create_account_button.pack(padx=10, pady=(0, 10))
 
         self.receive_thread = threading.Thread(target=self.handle_receive)
         self.receive_thread.daemon = True
         self.receive_thread.start()
 
-    def encrypt_message(self, message):
-        backend = default_backend()
-        cipher = Cipher(algorithms.AES(KEY), modes.CBC(IV), backend=backend)
-        encryptor = cipher.encryptor()
-        padder = padding.PKCS7(128).padder()
-        padded_data = padder.update(message.encode()) + padder.finalize()
-        encrypted_message = encryptor.update(padded_data) + encryptor.finalize()
-        return encrypted_message
+        self.username = None
 
-    def decrypt_message(self, encrypted_message):
-        backend = default_backend()
-        cipher = Cipher(algorithms.AES(KEY), modes.CBC(IV), backend=backend)
-        decryptor = cipher.decryptor()
-        unpadder = padding.PKCS7(128).unpadder()
-        decrypted_padded_message = decryptor.update(encrypted_message) + decryptor.finalize()
-        decrypted_message = unpadder.update(decrypted_padded_message) + unpadder.finalize()
-        return decrypted_message.decode()
+    def login(self):
+        username = self.username_entry.get()
+        private_key_pem = self.private_key_entry.get().encode()
+
+        try:
+            private_key = serialization.load_pem_private_key(private_key_pem, password=None)
+            public_key = private_key.public_key()
+            public_key_pem = public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            login_message = f"LOGIN:{username}:{public_key_pem.decode()}"
+            self.server_socket.send(login_message.encode())
+            self.login_window.destroy()
+            self.username = username
+        except Exception as e:
+            self.display_message(f"Login failed: {e}")
+
+    def create_account(self):
+        username = self.username_entry.get()
+        if username:
+            try:
+                self.server_socket.send(f"REQUEST_USER_CREATION:{username}".encode())
+                self.display_message(f"Account creation request sent for {username}. Please wait for approval.")
+            except Exception as e:
+                self.display_message(f"Error sending account creation request: {e}")
 
     def handle_receive(self):
-        while True:
-            try:
-                message = self.client_socket.recv(1024)
-                if message:
-                    try:
-                        decrypted_message = self.decrypt_message(message)
-                        self.display_message(decrypted_message)
-                    except Exception as e:
-                        self.display_message(f"Failed to decrypt message: {e}")
-            except:
-                break
+        try:
+            while True:
+                message = self.server_socket.recv(1024).decode()
+                if message.startswith("-----BEGIN PUBLIC KEY-----"):
+                    continue
+                if not message.startswith("LOGIN"):
+                    if message:
+                        self.display_message(message)
+                    else:
+                        self.display_message("Server disconnected.")
+                        break
+        except Exception as e:
+            self.display_message(f"Connection error: {e}")
 
     def send_message(self):
         message = self.entry_box.get()
         if message:
-            encrypted_message = self.encrypt_message(message)
-            self.client_socket.send(encrypted_message)
-            self.entry_box.delete(0, END)
+            try:
+                self.server_socket.send(f"{self.username}:{message}".encode())
+                self.display_message(f"You: {message}")
+                self.entry_box.delete(0, END)
+            except Exception as e:
+                self.display_message(f"Failed to send message: {e}")
 
     def display_message(self, message):
         self.text_area.config(state=NORMAL)
