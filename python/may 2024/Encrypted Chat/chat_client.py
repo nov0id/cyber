@@ -1,105 +1,86 @@
-import os
 import socket
-import hashlib
-import logging
-from termcolor import colored
+import threading
+from tkinter import Tk, Text, Entry, Button, END, DISABLED, NORMAL, Scrollbar, VERTICAL
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives.hashes import SHA256
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+KEY = b'1234567890abcdef'
+IV = b'abcdef1234567890'
 
-# Receiving The Value Of IP and PORT From the User
-SERVER_IP = input(colored("What Is Ip of the server running: ", "green"))
-SERVER_PORT = int(input(colored("Enter Port No on which the server is running: ", "green")))
-USER_NAME = input(colored("Please Choose a Username for Chat: ", "green"))
+class ChatClient:
+    def __init__(self, master):
+        self.master = master
+        self.master.title("Encrypted Chat Client")
 
-os.system('clear')
-print(colored("<1>ONLINE..", "green", attrs=['reverse', 'blink']))
+        self.text_area = Text(master, state=DISABLED, wrap='word', height=20, width=50)
+        self.text_area.pack(padx=10, pady=10)
 
-name = USER_NAME + ">> "
-encoded_name = name.encode()
+        self.scrollbar = Scrollbar(master, orient=VERTICAL, command=self.text_area.yview)
+        self.scrollbar.pack(side='right', fill='y')
+        self.text_area.config(yscrollcommand=self.scrollbar.set)
 
-def derive_key(password, salt):
-    kdf = Scrypt(
-        salt=salt,
-        length=32,
-        n=2**14,
-        r=8,
-        p=1,
-        backend=default_backend()
-    )
-    return kdf.derive(password)
+        self.entry_box = Entry(master, width=40)
+        self.entry_box.pack(padx=10, pady=(0, 10))
 
-def encrypt_message(message, key, iv):
-    cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
-    encryptor = cipher.encryptor()
-    ct = encryptor.update(message) + encryptor.finalize()
-    return ct
+        self.send_button = Button(master, text="Send", command=self.send_message)
+        self.send_button.pack(padx=10, pady=(0, 10))
 
-def decrypt_message(ciphertext, key, iv):
-    cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
-    decryptor = cipher.decryptor()
-    message = decryptor.update(ciphertext) + decryptor.finalize()
-    return message
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.client_socket.connect(("127.0.0.1", 9999))
 
-def chat():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((SERVER_IP, SERVER_PORT))
+        self.receive_thread = threading.Thread(target=self.handle_receive)
+        self.receive_thread.daemon = True
+        self.receive_thread.start()
 
-        # Placeholder for secure key exchange to get key and iv
-        password = b'secure_shared_secret'  # Replace with a proper key exchange mechanism
-        salt = os.urandom(16)
-        key = derive_key(password, salt)
-        iv = os.urandom(16)
+    def encrypt_message(self, message):
+        backend = default_backend()
+        cipher = Cipher(algorithms.AES(KEY), modes.CBC(IV), backend=backend)
+        encryptor = cipher.encryptor()
+        padder = padding.PKCS7(128).padder()
+        padded_data = padder.update(message.encode()) + padder.finalize()
+        encrypted_message = encryptor.update(padded_data) + encryptor.finalize()
+        return encrypted_message
 
+    def decrypt_message(self, encrypted_message):
+        backend = default_backend()
+        cipher = Cipher(algorithms.AES(KEY), modes.CBC(IV), backend=backend)
+        decryptor = cipher.decryptor()
+        unpadder = padding.PKCS7(128).unpadder()
+        decrypted_padded_message = decryptor.update(encrypted_message) + decryptor.finalize()
+        decrypted_message = unpadder.update(decrypted_padded_message) + unpadder.finalize()
+        return decrypted_message.decode()
+
+    def handle_receive(self):
         while True:
-            In_msg = s.recv(8192)
             try:
-                recv_data_1 = decrypt_message(In_msg, key, iv)
-                recv_data_unenc = recv_data_1.decode('utf-8')
-            except (UnicodeDecodeError, ValueError) as e:
-                logging.error(f"Decryption/Decoding error: {e}")
-                recv_data_unenc = recv_data_1  # Fallback to raw data
-
-            hash_object = hashlib.sha256(recv_data_unenc.encode())
-            hash_value = hash_object.hexdigest()
-            logging.info(f"Hash value of message: {hash_value}")
-
-            if recv_data_unenc.strip() == 'bye':
-                s.send('bye'.encode())
-                os.system('clear')
-                print(colored("<0>OFFLINE", "red", attrs=['bold']))
-                s.close()
+                message = self.client_socket.recv(1024)
+                if message:
+                    try:
+                        decrypted_message = self.decrypt_message(message)
+                        self.display_message(decrypted_message)
+                    except Exception as e:
+                        self.display_message(f"Failed to decrypt message: {e}")
+            except:
                 break
 
-            print("\n" + recv_data_unenc)
+    def send_message(self):
+        message = self.entry_box.get()
+        if message:
+            encrypted_message = self.encrypt_message(message)
+            self.client_socket.send(encrypted_message)
+            self.entry_box.delete(0, END)
 
-            Out_msg = input(colored("\nSEND-> ", "red", attrs=['bold']))
-            if Out_msg == 'bye':
-                s.send(Out_msg.encode())
-                os.system('clear')
-                print(colored("<0>OFFLINE", "red", attrs=['bold']))
-                s.close()
-                break
-            else:
-                data = encoded_name + Out_msg.encode()
-                send_data = encrypt_message(data, key, iv)
-                s.send(send_data)
-
-    except Exception as e:
-        logging.error(f"Connection error: {e}")
-    finally:
-        s.close()
+    def display_message(self, message):
+        self.text_area.config(state=NORMAL)
+        self.text_area.insert(END, message + '\n')
+        self.text_area.config(state=DISABLED)
+        self.text_area.see(END)
 
 def main():
-    chat()
+    root = Tk()
+    client = ChatClient(root)
+    root.mainloop()
 
 if __name__ == "__main__":
     main()
