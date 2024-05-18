@@ -4,7 +4,7 @@ import json
 import os
 import base64
 import getpass
-from tkinter import Tk, Text, Entry, Button, END, DISABLED, NORMAL
+import customtkinter as ctk
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
 
@@ -210,13 +210,13 @@ class ServerGUI:
         self.master = master
         self.master.title("Server GUI")
 
-        self.text_area = Text(master, state=DISABLED, wrap='word', height=20, width=50)
+        self.text_area = ctk.CTkTextbox(master, state=ctk.DISABLED, wrap='word', height=400, width=500)
         self.text_area.pack(padx=10, pady=10)
 
-        self.entry_box = Entry(master, width=50)
+        self.entry_box = ctk.CTkEntry(master, width=400)
         self.entry_box.pack(padx=10, pady=(0, 10))
 
-        self.send_button = Button(master, text="Send", command=self.process_command)
+        self.send_button = ctk.CTkButton(master, text="Send", command=self.process_command)
         self.send_button.pack(padx=10, pady=(0, 10))
 
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -230,10 +230,10 @@ class ServerGUI:
         self.accept_thread.start()
 
     def log(self, message):
-        self.text_area.config(state=NORMAL)
-        self.text_area.insert(END, message + '\n')
-        self.text_area.config(state=DISABLED)
-        self.text_area.see(END)
+        self.text_area.configure(state=ctk.NORMAL)
+        self.text_area.insert(ctk.END, message + '\n')
+        self.text_area.configure(state=ctk.DISABLED)
+        self.text_area.see(ctk.END)
 
     def accept_clients(self):
         while True:
@@ -254,11 +254,13 @@ class ServerGUI:
                 self.log("Invalid command. Use 'approve <username>' or 'deny <username>'")
         else:
             self.log("Invalid command format. Use 'approve <username>' or 'deny <username>'")
-        self.entry_box.delete(0, END)
+        self.entry_box.delete(0, ctk.END)
 
 def main():
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("dark-blue")
     load_users_from_file()
-    root = Tk()
+    root = ctk.CTk()
     gui = ServerGUI(root)
     root.mainloop()
 
