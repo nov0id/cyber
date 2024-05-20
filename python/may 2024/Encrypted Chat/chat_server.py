@@ -86,8 +86,13 @@ def handle_client(client_socket, addr, log_func, server_private_key, server_publ
             log_func(f"Received message from {addr}: {message}")
             if message.startswith("REQUEST_USER_CREATION"):
                 username = message.split(":")[1]
-                user_requests[username] = (client_socket, addr)
-                log_func(f"User creation request received for {username} from {addr}")
+                #If user account doesn't exist, we append the creation request for further manual approval. If not we deny and inform
+                if username not in users:
+                    user_requests[username] = (client_socket, addr)
+                    log_func(f"User creation request received for {username} from {addr}")
+                else:
+                    log_func(f"Denied user account creation request automatically. Account already exists.")
+                    client_socket.send(f"INVALID_USER".encode())
             elif message.startswith("LOGIN_REQUEST"):
                 username = message.split(":")[1]
                 if username in users:
@@ -96,6 +101,7 @@ def handle_client(client_socket, addr, log_func, server_private_key, server_publ
                     client_socket.send(f"CHALLENGE:{challenge}".encode())
                 else:
                     client_socket.send(b"INVALID_USER")
+            #Listens for a challenge response from clients. Handles all exceptions.
             elif message.startswith("CHALLENGE_RESPONSE"):
                 username, response = message.split(":")[1:]
                 if username in challenges:
