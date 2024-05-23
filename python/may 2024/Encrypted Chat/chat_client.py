@@ -92,7 +92,6 @@ class ChatClient:
                         encoding=serialization.Encoding.PEM,
                         format=serialization.PublicFormat.SubjectPublicKeyInfo
                     )
-                    self.server_socket.send(f"USER_PUBLIC_KEY:{self.username}:{base64.urlsafe_b64encode(public_key_pem).decode()}".encode())
                 elif message.startswith("PKEY:"):
                     server_public_key_pem = base64.urlsafe_b64decode(message.split(":")[1].encode())
                     self.server_public_key = serialization.load_pem_public_key(server_public_key_pem)
