@@ -251,7 +251,7 @@ class ServerGUI:
         self.send_button.pack(padx=10, pady=(0, 10))
 
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.bind(("0.0.0.0", 9999))
+        self.server_socket.bind(("127.0.0.1", 9999))
         self.server_socket.listen(5)
         self.log("Server listening on port 9999")
 
