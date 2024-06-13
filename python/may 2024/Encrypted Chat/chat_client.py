@@ -10,7 +10,7 @@ class ChatClient:
         self.master = master
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
-        self.master.title("Nyx Chat V1.0 Client")
+        self.master.title("Nyx Chat v1.0 Client")
 
         self.text_area = ctk.CTkTextbox(master, state=ctk.DISABLED, wrap='word', height=400, width=500)
         self.text_area.pack(padx=10, pady=10)
@@ -20,7 +20,7 @@ class ChatClient:
 
         self.send_button = ctk.CTkButton(master, text="Send", command=self.send_message)
         self.send_button.pack(padx=10, pady=(0, 10))
-
+        #Attempts to connect to the server @LOCAL:9999
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             self.server_socket.connect(("127.0.0.1", 9999))
@@ -146,7 +146,15 @@ class ChatClient:
                         label=None
                     )
                 )
-                self.server_socket.send(f"MSG:{base64.urlsafe_b64encode(encrypted_message).decode()}".encode())
+                signature = self.private_key.sign(
+                    encrypted_message,
+                    padding.PSS(
+                        mgf=padding.MGF1(hashes.SHA256()),
+                        salt_length=padding.PSS.MAX_LENGTH
+                    ),
+                hashes.SHA256()
+                )
+                self.server_socket.send(f"MSG:{base64.urlsafe_b64encode(encrypted_message).decode()}:{base64.urlsafe_b64encode(signature).decode()}".encode())
                 self.display_message(f"You: {message}")
                 self.entry_box.delete(0, ctk.END)
             except Exception as e:
@@ -160,7 +168,7 @@ class ChatClient:
 
 def main():
     root = ctk.CTk()
-    client = ChatClient(root)
+    ChatClient(root)
     root.mainloop()
 
 if __name__ == "__main__":

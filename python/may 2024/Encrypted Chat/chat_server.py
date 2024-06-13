@@ -21,6 +21,68 @@ challenges = {}
 # Stores the public keys of actively connected clients
 client_public_keys = {}
 
+# GUI class for the server
+class ServerGUI:
+    def __init__(self, master):
+        #Sets reference to 'master' or our instance of our GUI
+        self.master = master
+
+        #Sets the theme of the GUI
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("dark-blue")
+
+        #Sets title
+        self.master.title("Nyx Chat v1.0 Server")
+
+        self.text_area = ctk.CTkTextbox(master, state=ctk.DISABLED, wrap='word', height=400, width=500)
+        self.text_area.pack(padx=10, pady=10)
+
+        self.entry_box = ctk.CTkEntry(master, width=400)
+        self.entry_box.pack(padx=10, pady=(0, 10))
+
+        self.send_button = ctk.CTkButton(master, text="Send", command=self.process_command)
+        self.send_button.pack(padx=10, pady=(0, 10))
+
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.bind(("127.0.0.1", 9999))
+        self.server_socket.listen(5)
+        self.log("Server listening on port 9999")
+
+        self.server_private_key, self.server_public_key = load_or_generate_server_keys()
+
+        #Begins actively listening for clients
+        self.accept_thread = threading.Thread(target=self.accept_clients)
+        self.accept_thread.start()
+
+    def log(self, message):
+        self.text_area.configure(state=ctk.NORMAL)
+        self.text_area.insert(ctk.END, message + '\n')
+        self.text_area.configure(state=ctk.DISABLED)
+        self.text_area.see(ctk.END)
+
+    def accept_clients(self):
+        while True:
+            #Listens for new connections and accepts them
+            client_socket, addr = self.server_socket.accept()
+            self.log(f"Accepted connection from {addr}")
+            #Starts a thread for handling the client
+            client_handler = threading.Thread(target=handle_client, args=(client_socket, addr, self.log, self.server_private_key, self.server_public_key))
+            client_handler.start()
+
+    def process_command(self):
+        command = self.entry_box.get().strip().split()
+        if len(command) == 2:
+            action, username = command
+            if action == "approve":
+                approve_request(username, self.log)
+            elif action == "deny":
+                deny_request(username, self.log)
+            else:
+                self.log("Invalid command. Use 'approve <username>' or 'deny <username>'")
+        else:
+            self.log("Invalid command format. Use 'approve <username>' or 'deny <username>'")
+        self.entry_box.delete(0, ctk.END)
+
 # Load or generate server keys, this function returns the variables private_key, public_key
 def load_or_generate_server_keys():
     #Checks to see if keys are already created
@@ -96,7 +158,7 @@ def handle_client(client_socket, addr, log_func, server_private_key, server_publ
     log_func(f"Handling client from {addr}")
     try:
         while True:
-            # Waits for a message from the client, and decodes that to the variable 'message' upon receipt
+            # Waits for a message from the client, and decodes in bytes to the 'message' string for handling
             message = client_socket.recv(1024).decode()
             # If message is blank, this is a signal that the client has disconnected
             if not message:
@@ -104,7 +166,9 @@ def handle_client(client_socket, addr, log_func, server_private_key, server_publ
                 #Breaks to 'Finally' in order to handle removal of the client from the clients dictionary that stores
                 #actively connected users
                 break
+            #Uncomment to show undecrypted raw verbose of all messages received on the server
             #log_func(f"Received message from {addr}: {message}")
+            #Handles user creation requests
             if message.startswith("REQUEST_USER_CREATION"):
                 username = message.split(":")[1]
                 #If user account doesn't exist, we append the creation request for further manual approval. If not we deny and inform
@@ -115,6 +179,8 @@ def handle_client(client_socket, addr, log_func, server_private_key, server_publ
                     log_func(f"Denied user account creation request automatically. Account already exists.")
                     client_socket.send(f"INVALID_USER".encode())
             # Handles login requests from the client by responding with a challenge to be signed with thier private key.
+            #Prevents messages from being handled by users who are not "logged in" as they will likely not have the public
+            #key to our server
             elif message.startswith("LOGIN_REQUEST"):
                 username = message.split(":")[1]
                 if username in users:
@@ -153,21 +219,40 @@ def handle_client(client_socket, addr, log_func, server_private_key, server_publ
             elif message.startswith("PKEY_REQUEST"):
                 client_socket.send(f"PKEY:{base64.urlsafe_b64encode(server_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)).decode()}".encode())
             elif message.startswith("MSG:"):
+                #Unpacks our message 
+                encrypted_message = base64.urlsafe_b64decode(message.split(":")[1].encode())
+                signature = base64.urlsafe_b64decode(message.split(":")[2].encode())
+                #Verify signature if not, fail and report activity to the log
                 try:
-                    encrypted_message = base64.urlsafe_b64decode(message.split("MSG:")[1].encode())
-                    decrypted_message = server_private_key.decrypt(
+                    #Grabs our public key from the users object using the username established during login
+                    public_key = serialization.load_pem_public_key(users[username]['public_key'].encode())
+                    public_key.verify(
+                        signature,
                         encrypted_message,
-                        padding.OAEP(
-                            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                            algorithm=hashes.SHA256(),
-                            label=None
-                        )
-                    ).decode()
-                    log_func(f"Decrypted message from {addr}: {decrypted_message}")
-                    broadcast_message(decrypted_message, client_socket)
+                        padding.PSS(
+                            mgf=padding.MGF1(hashes.SHA256()),
+                            salt_length=padding.PSS.MAX_LENGTH
+                        ),
+                    hashes.SHA256()
+                    )
+                    #Once the key is verified we can now decrypt our message and broadcast to our peers
+                    try:
+                        decrypted_message = server_private_key.decrypt(
+                            encrypted_message,
+                            padding.OAEP(
+                                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                                algorithm=hashes.SHA256(),
+                                label=None
+                            )
+                        ).decode()
+                        log_func(f"Decrypted message from {addr}: {decrypted_message}")
+                        #Broadcasts to peers and carries over the 'client_socket' variable to be used for exclusion from broadcast
+                        broadcast_message(decrypted_message, client_socket)
+                    except Exception as e:
+                        log_func(f"Error decrypting message from {addr}: {e}")
+                        client_socket.send(b"INVALID_MESSAGE")
                 except Exception as e:
-                    log_func(f"Error decrypting message from {addr}: {e}")
-                    client_socket.send(b"INVALID_MESSAGE")
+                    log_func(f"Signature verification failed from {addr} {e}")
             else:
                 client_socket.send(b"INVALID_MESSAGE")
     except Exception as e:
@@ -222,7 +307,7 @@ def deny_request(username, log_func):
     if username in user_requests:
         client_socket, addr = user_requests.pop(username)
         try:
-            client_socket.send(b"REQUEST_DENIED")
+            client_socket.send(b"INVALID_USER")
             log_func(f"User {username} denied from {addr}")
         except Exception as e:
             log_func(f"Error denying user {username} from {addr}: {e}")
@@ -235,70 +320,12 @@ def deny_request(username, log_func):
     else:
         log_func(f"No request found for user {username}")
 
-# GUI class for the server
-class ServerGUI:
-    def __init__(self, master):
-        #Sets reference to 'master' or our instance of our GUI
-        self.master = master
-
-        #Sets the theme of the GUI
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("dark-blue")
-
-        #Sets title
-        self.master.title("Nyx Chat V1.0 Server")
-
-        self.text_area = ctk.CTkTextbox(master, state=ctk.DISABLED, wrap='word', height=400, width=500)
-        self.text_area.pack(padx=10, pady=10)
-
-        self.entry_box = ctk.CTkEntry(master, width=400)
-        self.entry_box.pack(padx=10, pady=(0, 10))
-
-        self.send_button = ctk.CTkButton(master, text="Send", command=self.process_command)
-        self.send_button.pack(padx=10, pady=(0, 10))
-
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.bind(("127.0.0.1", 9999))
-        self.server_socket.listen(5)
-        self.log("Server listening on port 9999")
-
-        self.server_private_key, self.server_public_key = load_or_generate_server_keys()
-
-        self.accept_thread = threading.Thread(target=self.accept_clients)
-        self.accept_thread.start()
-
-    def log(self, message):
-        self.text_area.configure(state=ctk.NORMAL)
-        self.text_area.insert(ctk.END, message + '\n')
-        self.text_area.configure(state=ctk.DISABLED)
-        self.text_area.see(ctk.END)
-
-    def accept_clients(self):
-        while True:
-            client_socket, addr = self.server_socket.accept()
-            self.log(f"Accepted connection from {addr}")
-            client_handler = threading.Thread(target=handle_client, args=(client_socket, addr, self.log, self.server_private_key, self.server_public_key))
-            client_handler.start()
-
-    def process_command(self):
-        command = self.entry_box.get().strip().split()
-        if len(command) == 2:
-            action, username = command
-            if action == "approve":
-                approve_request(username, self.log)
-            elif action == "deny":
-                deny_request(username, self.log)
-            else:
-                self.log("Invalid command. Use 'approve <username>' or 'deny <username>'")
-        else:
-            self.log("Invalid command format. Use 'approve <username>' or 'deny <username>'")
-        self.entry_box.delete(0, ctk.END)
 
 #Main loop
 def main():
     load_users_from_file()
     root = ctk.CTk()
-    gui = ServerGUI(root)
+    ServerGUI(root)
     root.mainloop()
 
 #Checks to see if this is being imported as a class or being run explicitly
