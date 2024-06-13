@@ -154,7 +154,11 @@ class ChatClient:
                     ),
                 hashes.SHA256()
                 )
-                self.server_socket.send(f"MSG:{base64.urlsafe_b64encode(encrypted_message).decode()}:{base64.urlsafe_b64encode(signature).decode()}".encode())
+                self.server_socket.send(f"MSG:
+                                        {base64.urlsafe_b64encode(encrypted_message).decode()}:
+                                        {base64.urlsafe_b64encode(signature).decode()}"
+                                        .encode()
+                                        )
                 self.display_message(f"You: {message}")
                 self.entry_box.delete(0, ctk.END)
             except Exception as e:
