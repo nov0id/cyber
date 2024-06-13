@@ -8,7 +8,9 @@ from cryptography.hazmat.primitives.asymmetric import padding
 class ChatClient:
     def __init__(self, master):
         self.master = master
-        self.master.title("Chat Client")
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("dark-blue")
+        self.master.title("Nyx Chat V1.0 Client")
 
         self.text_area = ctk.CTkTextbox(master, state=ctk.DISABLED, wrap='word', height=400, width=500)
         self.text_area.pack(padx=10, pady=10)
@@ -157,8 +159,6 @@ class ChatClient:
         self.text_area.see(ctk.END)
 
 def main():
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("dark-blue")
     root = ctk.CTk()
     client = ChatClient(root)
     root.mainloop()

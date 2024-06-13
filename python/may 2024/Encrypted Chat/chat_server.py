@@ -238,8 +238,15 @@ def deny_request(username, log_func):
 # GUI class for the server
 class ServerGUI:
     def __init__(self, master):
+        #Sets reference to 'master' or our instance of our GUI
         self.master = master
-        self.master.title("Server GUI")
+
+        #Sets the theme of the GUI
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("dark-blue")
+
+        #Sets title
+        self.master.title("Nyx Chat V1.0 Server")
 
         self.text_area = ctk.CTkTextbox(master, state=ctk.DISABLED, wrap='word', height=400, width=500)
         self.text_area.pack(padx=10, pady=10)
@@ -287,14 +294,14 @@ class ServerGUI:
             self.log("Invalid command format. Use 'approve <username>' or 'deny <username>'")
         self.entry_box.delete(0, ctk.END)
 
+#Main loop
 def main():
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("dark-blue")
     load_users_from_file()
     root = ctk.CTk()
     gui = ServerGUI(root)
     root.mainloop()
 
+#Checks to see if this is being imported as a class or being run explicitly
 if __name__ == "__main__":
     main()
 
