@@ -167,7 +167,7 @@ def handle_client(client_socket, addr, log_func, server_private_key, server_publ
                 #actively connected users
                 break
             #Uncomment to show undecrypted raw verbose of all messages received on the server
-            #log_func(f"Received message from {addr}: {message}")
+            log_func(f"Received message from {addr}: {message}")
             #Handles user creation requests
             if message.startswith("REQUEST_USER_CREATION"):
                 username = message.split(":")[1]
