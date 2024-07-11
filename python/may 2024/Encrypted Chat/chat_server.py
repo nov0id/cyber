@@ -268,6 +268,7 @@ def handle_client(client_socket, addr, log_func, server_private_key, server_publ
 
 # Function to approve a user creation request
 def approve_request(username, log_func):
+    #Looks to see if the user actually requested an account creation and then continues on if everything looks correct, if not we inform the console
     if username in user_requests:
         client_socket, addr = user_requests.pop(username)
         try:
@@ -304,18 +305,24 @@ def approve_request(username, log_func):
 
 # Function to deny a user creation request
 def deny_request(username, log_func):
+    #Looks to see if user actually requested an account creation, if not we inform the console
     if username in user_requests:
+        #Removes the request from our user requests list
         client_socket, addr = user_requests.pop(username)
         try:
+            #Trys to inform the client that the account creation has been denied.
             client_socket.send(b"INVALID_USER")
             log_func(f"User {username} denied from {addr}")
         except Exception as e:
+            #Debugging verbose
             log_func(f"Error denying user {username} from {addr}: {e}")
         finally:
+            #Closes the clients connection via the socket, reports an error if we run into them
             log_func(f"Closing client socket from {addr}")
             try:
                 client_socket.close()
             except Exception as close_error:
+                #Debugging verbose
                 log_func(f"Error closing client socket during denial from {addr}: {close_error}")
     else:
         log_func(f"No request found for user {username}")
