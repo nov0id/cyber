@@ -1,0 +1,74 @@
+/* Page Background */
+html, body {
+    background: url('https://i.ibb.co/R2Y3xdR/background2.png') no-repeat center center fixed;
+    background-size: cover;
+    color: #f5f5f5; /* Light gray text for contrast */
+    font-family: "Tahoma", "Verdana", sans-serif; /* Clean body font */}
+
+/* Column Setup (Panels) */
+#columns {
+    width: 960px;
+    margin: 0 auto; /* Centers columns */
+    background-color: rgba(0, 0, 0, 0.6); /* Dark, semi-transparent background */
+    box-shadow: 0px 0px 10px rgba(255, 255, 255, 0.2); /* Soft glow effect */
+    border-radius: 15px;
+}
+
+/* Individual Panels */
+.panel {
+    background-color: rgba(0, 0, 0, 0.8); /* Black panel background */
+    color: #f5f5f5; /* Text color */
+    border: 1px solid #444; /* Slight border */
+    padding: 10px;
+    margin-bottom: 20px;
+    border-radius: 10px;
+    box-shadow: 0px 0px 15px rgba(255, 0, 0, 0.4); /* Red glow for vibes */
+}
+
+/* Panel Headers */
+.panel h2 {
+    background: linear-gradient(to right, #000000, #660066); /* Purple/black gradient */
+    color: #ffffff; /* White text */
+    text-shadow: 1px 1px 6px #660000; /* Red shadow for dramatic effect */
+    padding: 5px;
+    border-radius: 5px;
+    font-size: 1.5em;
+    font-family: "Georgia", "Garamond", serif; /* Gothic headings */
+}
+
+/* Links */
+a {
+    font-family: "Lucida Sans", sans-serif; /* Emo/alt styling for links */
+    color: #cc00cc; /* Dark purple for aesthetic */
+    text-decoration: none;
+}
+a:hover {
+    color: #ff7af0; /* pinkish when hovered */
+}
+
+/* Avatar Image (Optional Circle Crop) */
+#id_details p img {
+    width: 77%;  /* Image takes up 50% of the parent container's width */
+    height: auto; /* Auto height maintains aspect ratio */
+    display: block; /* Ensures the image behaves like a block element for easier centering */
+    margin: 0 auto; /* Horizontally centers the avatar */
+    border-radius: 10% 30% 10% 30%; /* Top-left, top-right, bottom-right, bottom-left */
+    border: 1px solid rgba(255, 100, 100, 0.5); /* Red border with 50% transparency */
+    box-shadow: 0px 0px 20px rgba(194, 0, 247, 0.5); /* Soft purple glow */
+}
+
+/* Friends and Comments Panel Customization */
+#id_friends .dropBox .avatarImage, 
+#id_comments .dropBox .avatarImage {
+    border: 2px solid #660066;
+    border-radius: 10px;
+    box-shadow: 0 0 5px #ffffff; /* Soft white glow around avatars */
+}
+
+/* Center your profile content */
+#columns, #pictures_container, #texts_container {
+    width: 1000px;
+    left: calc(50% - 500px);
+    position: absolute;
+}
+
